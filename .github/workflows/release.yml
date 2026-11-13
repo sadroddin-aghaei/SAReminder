@@ -1,0 +1,51 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x64, os: windows-latest, icon: assets/icon.ico }
+          - { name: windows-arm64, os: windows-11-arm, icon: assets/icon.ico }
+          - { name: macos-apple-silicon, os: macos-latest, icon: assets/icon.icns }
+          - { name: macos-intel, os: macos-15-intel, icon: assets/icon.icns }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+      - run: python make_icon.py
+      - run: pyinstaller --noconfirm --windowed --name SAReminder --icon ${{ matrix.icon }} app.py
+      - name: Package (Windows zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive dist/SAReminder "SAReminder-${{ github.ref_name }}-${{ matrix.name }}.zip"
+      - name: Package (macOS dmg)
+        if: runner.os == 'macOS'
+        run: hdiutil create -volname SAReminder -srcfolder dist/SAReminder.app -ov -format UDZO "SAReminder-${{ github.ref_name }}-${{ matrix.name }}.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            SAReminder-*.zip
+            SAReminder-*.dmg
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true }
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          name: SAReminder ${{ github.ref_name }}
+          files: out/*
